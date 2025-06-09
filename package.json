@@ -22,7 +22,10 @@
   "devDependencies": {
     "nodemon": "^3.0.2"
   },
+ {
+  "license": "MIT",
   "engines": {
     "node": ">=18.x"
   }
+}
 }
