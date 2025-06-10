@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const WebSocket = require('ws');
 const mongoose = require('mongoose');
+const path = require('path');
 
 // Configuração inicial
 const app = express();
@@ -23,16 +24,31 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://joaofranciscovicapaul
 .then(() => console.log('Connected to MongoDB'))
 .catch(err => console.error('MongoDB connection error:', err));
 
+// Função para carregar rotas com tratamento de erro
+const loadRoute = (routePath) => {
+  try {
+    const route = require(routePath);
+    if (typeof route !== 'function' || !route.stack) {
+      throw new Error(`Invalid router exported from ${routePath}`);
+    }
+    return route;
+  } catch (err) {
+    console.error(`Error loading route ${routePath}:`, err);
+    // Retorna um router vazio para evitar quebrar o servidor
+    const emptyRouter = express.Router();
+    emptyRouter.use((req, res) => res.status(503).json({ 
+      error: 'Route temporarily unavailable',
+      details: err.message
+    }));
+    return emptyRouter;
+  }
+};
+
 // Carregamento seguro de rotas
-try {
-  app.use('/api/auth', require('./routes/auth'));
-  app.use('/api/sites', require('./routes/sites'));
-  app.use('/api/logs', require('./routes/logs'));
-  app.use('/api/analytics', require('./routes/analytics'));
-} catch (err) {
-  console.error('Error loading routes:', err);
-  process.exit(1);
-}
+app.use('/api/auth', loadRoute('./routes/auth'));
+app.use('/api/sites', loadRoute('./routes/sites'));
+app.use('/api/logs', loadRoute('./routes/logs'));
+app.use('/api/analytics', loadRoute('./routes/analytics'));
 
 // Rota de health check para o Render
 app.get('/health', (req, res) => {
