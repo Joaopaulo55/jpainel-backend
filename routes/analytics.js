@@ -1,34 +1,79 @@
 const express = require('express');
 const router = express.Router();
-const { GoogleAuth } = require('../services/googleAuth');
-const { Site } = require('../models');
 const auth = require('../middleware/auth');
+const Site = require('../models/Site');
+const Log = require('../models/Log');
+const { GoogleAuth } = require('../services/googleAuth');
 
-// Protege todas as rotas com autenticação
 router.use(auth);
 
-// Obter dados do Google Analytics
+// Obter dados de analytics de um site
 router.get('/:siteId', async (req, res) => {
   try {
-    const site = await Site.findOne({ 
+    const site = await Site.findOne({
       _id: req.params.siteId,
-      userId: req.userId 
+      userId: req.userId
     });
-    
+
     if (!site) {
-      return res.status(404).json({ error: 'Site not found' });
+      return res.status(404).json({ error: 'Site não encontrado' });
     }
 
-    const auth = new GoogleAuth(site.googleRefreshToken);
-    const analytics = await auth.getAnalyticsData();
-    
+    if (!site.googleRefreshToken || !site.googleAnalyticsId) {
+      return res.status(400).json({ error: 'Google Analytics não configurado para este site' });
+    }
+
+    const googleAuth = new GoogleAuth(site.googleRefreshToken);
+    const analyticsData = await googleAuth.getAnalyticsData(site.googleAnalyticsId);
+
+    await Log.create({
+      level: 'info',
+      message: 'Dados do Google Analytics obtidos',
+      context: { siteId: site._id }
+    });
+
+    res.json(analyticsData);
+  } catch (error) {
+    await Log.create({
+      level: 'error',
+      message: 'Erro ao obter dados do Google Analytics',
+      context: { siteId: req.params.siteId, error: error.message }
+    });
+    res.status(500).json({ error: 'Erro ao obter dados de analytics' });
+  }
+});
+
+// Obter histórico de uptime
+router.get('/:siteId/uptime', async (req, res) => {
+  try {
+    const site = await Site.findOne({
+      _id: req.params.siteId,
+      userId: req.userId
+    });
+
+    if (!site) {
+      return res.status(404).json({ error: 'Site não encontrado' });
+    }
+
+    // Filtra os últimos 30 dias de verificações
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const uptimeChecks = site.uptimeChecks
+      .filter(check => check.timestamp >= thirtyDaysAgo)
+      .sort((a, b) => a.timestamp - b.timestamp);
+
     res.json({
-      traffic: analytics.traffic,
-      demographics: analytics.demographics,
-      behavior: analytics.behavior
+      uptime: site.calculateUptime('all'),
+      checks: uptimeChecks
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    await Log.create({
+      level: 'error',
+      message: 'Erro ao obter histórico de uptime',
+      context: { siteId: req.params.siteId, error: error.message }
+    });
+    res.status(500).json({ error: 'Erro ao obter histórico de uptime' });
   }
 });
 
